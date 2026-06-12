@@ -72,6 +72,42 @@ class TossClient:
             self._raise_api_error(response)
         return response.json()
 
+    def get_prices(self, symbols: list[str]) -> Any:
+        return _result(self._request("GET", "/api/v1/prices", params={"symbols": ",".join(symbols)}))
+
+    def get_stocks(self, symbols: list[str]) -> Any:
+        return _result(self._request("GET", "/api/v1/stocks", params={"symbols": ",".join(symbols)}))
+
+    def get_accounts(self) -> Any:
+        return _result(self._request("GET", "/api/v1/accounts"))
+
+    def get_holdings(self, *, account_seq: int | str, symbol: str | None = None) -> Any:
+        params = {"symbol": symbol} if symbol else None
+        return _result(self._request("GET", "/api/v1/holdings", params=params, account_seq=account_seq))
+
+    def get_buying_power(self, *, account_seq: int | str, currency: str) -> Any:
+        return _result(
+            self._request(
+                "GET",
+                "/api/v1/buying-power",
+                params={"currency": currency},
+                account_seq=account_seq,
+            )
+        )
+
+    def get_sellable_quantity(self, *, account_seq: int | str, symbol: str) -> Any:
+        return _result(
+            self._request(
+                "GET",
+                "/api/v1/sellable-quantity",
+                params={"symbol": symbol},
+                account_seq=account_seq,
+            )
+        )
+
+    def get_commissions(self, *, account_seq: int | str) -> Any:
+        return _result(self._request("GET", "/api/v1/commissions", account_seq=account_seq))
+
     def _raise_api_error(self, response: httpx.Response) -> None:
         payload = _safe_json(response)
         error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
@@ -108,3 +144,7 @@ def _safe_json(response: httpx.Response) -> dict[str, Any]:
     except ValueError:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _result(payload: dict[str, Any]) -> Any:
+    return payload.get("result", payload)
