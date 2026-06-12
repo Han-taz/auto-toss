@@ -94,3 +94,31 @@ def test_order_info_methods_call_official_endpoints():
     assert buying_power.calls[0].request.url.params["currency"] == "KRW"
     assert sellable_quantity.calls[0].request.url.params["symbol"] == "005930"
     assert commissions.calls[0].request.headers["X-Tossinvest-Account"] == "7"
+
+
+@respx.mock
+def test_create_order_posts_payload_with_account_header():
+    mock_token()
+    route = respx.post("https://toss.example.test/api/v1/orders").mock(
+        return_value=httpx.Response(
+            200,
+            json={"result": {"orderId": "order-1", "clientOrderId": "client-1"}},
+        )
+    )
+    payload = {
+        "clientOrderId": "client-1",
+        "symbol": "005930",
+        "side": "BUY",
+        "orderType": "LIMIT",
+        "quantity": "1",
+        "price": "70000",
+    }
+
+    result = TossClient(make_config()).create_order(account_seq=7, payload=payload)
+
+    assert result == {"orderId": "order-1", "clientOrderId": "client-1"}
+    assert route.calls[0].request.headers["X-Tossinvest-Account"] == "7"
+    assert route.calls[0].request.read() == (
+        b'{"clientOrderId":"client-1","symbol":"005930","side":"BUY",'
+        b'"orderType":"LIMIT","quantity":"1","price":"70000"}'
+    )

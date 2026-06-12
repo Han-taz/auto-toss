@@ -108,6 +108,9 @@ class TossClient:
     def get_commissions(self, *, account_seq: int | str) -> Any:
         return _result(self._request("GET", "/api/v1/commissions", account_seq=account_seq))
 
+    def create_order(self, *, account_seq: int | str, payload: dict[str, Any]) -> Any:
+        return _result(self._request("POST", "/api/v1/orders", json=payload, account_seq=account_seq))
+
     def _raise_api_error(self, response: httpx.Response) -> None:
         payload = _safe_json(response)
         error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
