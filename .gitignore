@@ -16,3 +16,6 @@ wheels/
 
 # Local git worktrees
 .worktrees/
+
+# Local runtime state
+.auto_toss/
