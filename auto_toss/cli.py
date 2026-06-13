@@ -2,11 +2,13 @@ import argparse
 import json
 import sys
 import time
-from typing import Callable, TextIO
+from typing import Any, Callable, TextIO
 
+from auto_toss.audit import AuditStore
 from auto_toss.client import TossClient
 from auto_toss.config import Config, ConfigError
 from auto_toss.errors import TossApiError
+from auto_toss.execution import ExecutionError
 from auto_toss.orders import (
     LiveTradingNotEnabled,
     OrderRequest,
@@ -15,6 +17,11 @@ from auto_toss.orders import (
     build_order_payload,
 )
 from auto_toss.paper import PaperBroker, PaperTradingError
+from auto_toss.runner import StrategyRunner
+from auto_toss.strategy import StrategyConfigError
+
+
+DEFAULT_AUDIT_DB_PATH = ".auto_toss/auto_trading.sqlite3"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -90,6 +97,21 @@ def build_parser() -> argparse.ArgumentParser:
     place_order.add_argument("--account", required=True)
     _add_order_arguments(place_order)
 
+    run_strategy = subparsers.add_parser(
+        "run-strategy",
+        help="Run a strategy through risk, preflight, execution, and audit",
+    )
+    run_strategy.add_argument("--config", required=True)
+    run_strategy.add_argument("--mode", choices=["paper", "live"], default="paper")
+    run_strategy.add_argument("--live", action="store_true")
+    run_strategy.add_argument("--account")
+    run_strategy.add_argument("--interval", type=_non_negative_float, default=5.0)
+    iteration_group = run_strategy.add_mutually_exclusive_group()
+    iteration_group.add_argument("--iterations", type=_positive_int)
+    iteration_group.add_argument("--once", action="store_true")
+    run_strategy.add_argument("--db-path", default=None)
+    run_strategy.add_argument("--paper-db-path", default=None)
+
     return parser
 
 
@@ -99,6 +121,7 @@ def main(
     config_factory: Callable[[], Config] = Config.from_env,
     client_factory: Callable[[Config], TossClient] = TossClient,
     paper_broker_factory: Callable[[str | None], PaperBroker] | None = None,
+    runner_factory: Callable[..., StrategyRunner] | None = None,
     sleep: Callable[[float], None] | None = None,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
@@ -107,6 +130,7 @@ def main(
     stderr = stderr or sys.stderr
     sleep = sleep or time.sleep
     paper_broker_factory = paper_broker_factory or _build_paper_broker
+    runner_factory = runner_factory or StrategyRunner
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -182,15 +206,42 @@ def main(
             )
             payload = build_order_payload(_order_request_from_args(args))
             _print_json(client.create_order(account_seq=args.account, payload=payload), stdout)
+        elif args.command == "run-strategy":
+            if args.mode == "live":
+                assert_live_order_allowed(
+                    config_live_enabled=config.live_trading_enabled,
+                    cli_live=args.live,
+                )
+                if not args.account:
+                    raise OrderValidationError("Live strategy execution requires --account.")
+
+            runner = runner_factory(
+                config_path=args.config,
+                mode=args.mode,
+                audit_store=AuditStore(args.db_path or DEFAULT_AUDIT_DB_PATH),
+                toss_client=client,
+                paper_broker=paper_broker_factory(args.paper_db_path),
+                live_allowed=config.live_trading_enabled,
+                account_seq=args.account,
+            )
+            _stream_strategy_runs(
+                runner=runner,
+                stdout=stdout,
+                sleep=sleep,
+                interval=args.interval,
+                iterations=1 if args.once else args.iterations,
+            )
         else:
             parser.error(f"unknown command: {args.command}")
     except KeyboardInterrupt:
         return 130
     except (
         ConfigError,
+        ExecutionError,
         LiveTradingNotEnabled,
         OrderValidationError,
         PaperTradingError,
+        StrategyConfigError,
         TossApiError,
     ) as exc:
         print(str(exc), file=stderr)
@@ -265,6 +316,31 @@ def _stream_price_snapshots(
 
         sleep(interval)
         sequence += 1
+
+
+def _stream_strategy_runs(
+    *,
+    runner: Any,
+    stdout: TextIO,
+    sleep: Callable[[float], None],
+    interval: float,
+    iterations: int | None,
+) -> None:
+    sequence = 1
+    while iterations is None or sequence <= iterations:
+        _print_json(_run_result_payload(runner.run_once()), stdout)
+
+        if iterations is not None and sequence >= iterations:
+            break
+
+        sleep(interval)
+        sequence += 1
+
+
+def _run_result_payload(result: Any) -> Any:
+    if hasattr(result, "to_dict"):
+        return result.to_dict()
+    return result
 
 
 def _non_negative_float(value: str) -> float:

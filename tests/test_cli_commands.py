@@ -7,6 +7,26 @@ from auto_toss.cli import main
 from auto_toss.config import Config
 
 
+class FakeRunResult:
+    def to_dict(self):
+        return {
+            "runId": 1,
+            "status": "COMPLETED",
+            "executed": 0,
+            "rejected": 0,
+            "skipped": 0,
+        }
+
+
+class FakeRunner:
+    def __init__(self):
+        self.calls = []
+
+    def run_once(self):
+        self.calls.append(("run_once",))
+        return FakeRunResult()
+
+
 class FakeClient:
     def __init__(self):
         self.calls = []
@@ -36,7 +56,7 @@ def make_config(*, live=False):
     )
 
 
-def run_cli(argv, *, live=False, sleep=None):
+def run_cli(argv, *, live=False, sleep=None, runner_factory=None):
     fake_client = FakeClient()
     stdout = io.StringIO()
     stderr = io.StringIO()
@@ -44,6 +64,7 @@ def run_cli(argv, *, live=False, sleep=None):
         argv,
         config_factory=lambda: make_config(live=live),
         client_factory=lambda config: fake_client,
+        runner_factory=runner_factory,
         sleep=sleep,
         stdout=stdout,
         stderr=stderr,
@@ -207,3 +228,76 @@ def test_place_order_live_calls_create_order_when_config_enabled():
     assert fake_client.calls[0][0] == "create_order"
     assert fake_client.calls[0][1] == "7"
     assert fake_client.calls[0][2]["symbol"] == "005930"
+
+
+def test_run_strategy_paper_invokes_runner(tmp_path):
+    config = tmp_path / "strategy.toml"
+    config.write_text(
+        """
+        [risk]
+        max_order_amount = "1"
+        max_daily_notional = "1"
+        max_daily_orders = 1
+        allowed_symbols = []
+        """,
+        encoding="utf-8",
+    )
+    audit_db = tmp_path / "audit.sqlite3"
+    calls = []
+    fake_runner = FakeRunner()
+
+    def runner_factory(**kwargs):
+        calls.append(kwargs)
+        return fake_runner
+
+    exit_code, stdout, _, _ = run_cli(
+        [
+            "run-strategy",
+            "--config",
+            str(config),
+            "--mode",
+            "paper",
+            "--once",
+            "--db-path",
+            str(audit_db),
+        ],
+        runner_factory=runner_factory,
+    )
+
+    assert exit_code == 0
+    assert calls[0]["mode"] == "paper"
+    assert calls[0]["config_path"] == str(config)
+    assert fake_runner.calls == [("run_once",)]
+    assert json.loads(stdout)["status"] == "COMPLETED"
+
+
+def test_run_strategy_live_requires_live_flag(tmp_path):
+    config = tmp_path / "strategy.toml"
+    config.write_text(
+        """
+        [risk]
+        max_order_amount = "1"
+        max_daily_notional = "1"
+        max_daily_orders = 1
+        allowed_symbols = []
+        """,
+        encoding="utf-8",
+    )
+
+    exit_code, _, stderr, _ = run_cli(
+        [
+            "run-strategy",
+            "--config",
+            str(config),
+            "--mode",
+            "live",
+            "--account",
+            "7",
+            "--once",
+        ],
+        live=True,
+        runner_factory=lambda **kwargs: FakeRunner(),
+    )
+
+    assert exit_code == 2
+    assert "Live order placement requires" in stderr
