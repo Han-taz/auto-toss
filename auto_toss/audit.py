@@ -348,6 +348,42 @@ class AuditStore:
             "executions": self.executions(run_id=run_id, limit=None),
         }
 
+    def run_summaries(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            _create_schema(connection)
+            rows = connection.execute(
+                """
+                SELECT id, mode, config_path, status, started_at, completed_at
+                FROM runs
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+            return [_run_summary_row(connection, row) for row in rows]
+
+    def summary(self) -> dict[str, Any]:
+        with self._connect() as connection:
+            _create_schema(connection)
+            return {
+                "runs": {
+                    "total": _table_count(connection, "runs"),
+                    "byStatus": _count_by(connection, "runs", "status"),
+                },
+                "executions": {
+                    "total": _table_count(connection, "executions"),
+                    "byStatus": _count_by(connection, "executions", "status"),
+                },
+                "orderEvents": {
+                    "total": _table_count(connection, "order_events"),
+                    "byEventType": _count_by(connection, "order_events", "event_type"),
+                },
+                "reconciliations": {
+                    "total": _table_count(connection, "reconciliations"),
+                },
+            }
+
     def runs(self) -> list[dict[str, Any]]:
         with self._connect() as connection:
             _create_schema(connection)
@@ -535,3 +571,46 @@ def _execution_row(row: sqlite3.Row) -> dict[str, Any]:
         "result": _json_value(row["result_json"]),
         "createdAt": row["created_at"],
     }
+
+
+def _run_summary_row(connection: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+    summary = _run_row(row)
+    run_id = row["id"]
+    summary.update(
+        {
+            "intentCount": _where_count(connection, "intents", "run_id", run_id),
+            "checkCount": _where_count(connection, "checks", "run_id", run_id),
+            "executionCount": _where_count(connection, "executions", "run_id", run_id),
+        }
+    )
+    return summary
+
+
+def _table_count(connection: sqlite3.Connection, table: str) -> int:
+    row = connection.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()
+    return int(row["count"])
+
+
+def _where_count(
+    connection: sqlite3.Connection,
+    table: str,
+    column: str,
+    value: Any,
+) -> int:
+    row = connection.execute(
+        f"SELECT COUNT(*) AS count FROM {table} WHERE {column} = ?",
+        (value,),
+    ).fetchone()
+    return int(row["count"])
+
+
+def _count_by(connection: sqlite3.Connection, table: str, column: str) -> dict[str, int]:
+    rows = connection.execute(
+        f"""
+        SELECT {column} AS key, COUNT(*) AS count
+        FROM {table}
+        GROUP BY {column}
+        ORDER BY {column}
+        """
+    ).fetchall()
+    return {str(row["key"]): int(row["count"]) for row in rows}
