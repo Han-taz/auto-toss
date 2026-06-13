@@ -17,8 +17,8 @@ class Config:
     live_trading_enabled: bool = False
 
     @classmethod
-    def from_env(cls) -> "Config":
-        load_dotenv(dotenv_path=Path.cwd() / ".env")
+    def from_env(cls, *, dotenv_path: str | Path | None = None) -> "Config":
+        load_dotenv(dotenv_path=dotenv_path or Path.cwd() / ".env")
 
         client_id = os.getenv("API_KEY")
         client_secret = os.getenv("SECRET_KEY")
