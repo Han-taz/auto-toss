@@ -110,6 +110,125 @@ class AuditStore:
             )
             return int(cursor.lastrowid)
 
+    def record_order_event(
+        self,
+        *,
+        event_type: str,
+        order_id: str | None,
+        source_order_id: str | None = None,
+        status: str,
+        payload: dict[str, Any],
+        result: dict[str, Any],
+    ) -> int:
+        with self._connect() as connection:
+            _create_schema(connection)
+            cursor = connection.execute(
+                """
+                INSERT INTO order_events(
+                    event_type, order_id, source_order_id, status, payload_json, result_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_type,
+                    order_id,
+                    source_order_id,
+                    status,
+                    _json_text(payload),
+                    _json_text(result),
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def order_events(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            _create_schema(connection)
+            rows = connection.execute(
+                """
+                SELECT event_type, order_id, source_order_id, status,
+                       payload_json, result_json, created_at
+                FROM order_events
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+        return [
+            {
+                "eventType": row["event_type"],
+                "orderId": row["order_id"],
+                "sourceOrderId": row["source_order_id"],
+                "status": row["status"],
+                "payload": _json_value(row["payload_json"]),
+                "result": _json_value(row["result_json"]),
+                "createdAt": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def live_order_ids(self) -> list[str]:
+        with self._connect() as connection:
+            _create_schema(connection)
+            rows = connection.execute(
+                """
+                SELECT result_json
+                FROM executions
+                WHERE mode = 'live'
+                  AND status = 'SUBMITTED'
+                ORDER BY id
+                """
+            ).fetchall()
+
+        order_ids = []
+        for row in rows:
+            result = _json_value(row["result_json"])
+            order_id = result.get("orderId") if isinstance(result, dict) else None
+            if isinstance(order_id, str):
+                order_ids.append(order_id)
+        return order_ids
+
+    def record_reconciliation(
+        self,
+        *,
+        account_seq: int | str,
+        symbol: str | None,
+        report: dict[str, Any],
+    ) -> int:
+        with self._connect() as connection:
+            _create_schema(connection)
+            cursor = connection.execute(
+                """
+                INSERT INTO reconciliations(account_seq, symbol, report_json)
+                VALUES (?, ?, ?)
+                """,
+                (str(account_seq), symbol, _json_text(report)),
+            )
+            return int(cursor.lastrowid)
+
+    def reconciliations(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            _create_schema(connection)
+            rows = connection.execute(
+                """
+                SELECT account_seq, symbol, report_json, created_at
+                FROM reconciliations
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+        return [
+            {
+                "accountSeq": row["account_seq"],
+                "symbol": row["symbol"],
+                "report": _json_value(row["report_json"]),
+                "createdAt": row["created_at"],
+            }
+            for row in rows
+        ]
+
     def runs(self) -> list[dict[str, Any]]:
         with self._connect() as connection:
             _create_schema(connection)
@@ -216,9 +335,35 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             result_json TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS order_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT NOT NULL,
+            order_id TEXT,
+            source_order_id TEXT,
+            status TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            result_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS reconciliations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            account_seq TEXT NOT NULL,
+            symbol TEXT,
+            report_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
         """
     )
 
 
 def _json_text(value: dict[str, Any]) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _json_value(value: str) -> Any:
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return {}
