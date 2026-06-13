@@ -97,6 +97,38 @@ def test_order_info_methods_call_official_endpoints():
 
 
 @respx.mock
+def test_safety_read_endpoints_use_account_header_where_required():
+    mock_token()
+    warnings = respx.get("https://toss.example.test/api/v1/stocks/005930/warnings").mock(
+        return_value=httpx.Response(200, json={"result": []})
+    )
+    limits = respx.get("https://toss.example.test/api/v1/price-limits").mock(
+        return_value=httpx.Response(200, json={"result": {"symbol": "005930"}})
+    )
+    calendar = respx.get("https://toss.example.test/api/v1/market-calendar/KR").mock(
+        return_value=httpx.Response(200, json={"result": {"market": "KR"}})
+    )
+    orders = respx.get("https://toss.example.test/api/v1/orders").mock(
+        return_value=httpx.Response(200, json={"result": {"orders": []}})
+    )
+
+    client = TossClient(make_config())
+
+    assert client.get_stock_warnings("005930") == []
+    assert client.get_price_limits("005930") == {"symbol": "005930"}
+    assert client.get_market_calendar("KR") == {"market": "KR"}
+    assert client.get_orders(account_seq=7, status="OPEN", symbol="005930") == {"orders": []}
+
+    assert "X-Tossinvest-Account" not in warnings.calls[0].request.headers
+    assert "X-Tossinvest-Account" not in limits.calls[0].request.headers
+    assert "X-Tossinvest-Account" not in calendar.calls[0].request.headers
+    assert limits.calls[0].request.url.params["symbol"] == "005930"
+    assert orders.calls[0].request.headers["X-Tossinvest-Account"] == "7"
+    assert orders.calls[0].request.url.params["status"] == "OPEN"
+    assert orders.calls[0].request.url.params["symbol"] == "005930"
+
+
+@respx.mock
 def test_create_order_posts_payload_with_account_header():
     mock_token()
     route = respx.post("https://toss.example.test/api/v1/orders").mock(

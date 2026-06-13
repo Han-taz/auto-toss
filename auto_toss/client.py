@@ -108,6 +108,49 @@ class TossClient:
     def get_commissions(self, *, account_seq: int | str) -> Any:
         return _result(self._request("GET", "/api/v1/commissions", account_seq=account_seq))
 
+    def get_stock_warnings(self, symbol: str) -> Any:
+        return _result(self._request("GET", f"/api/v1/stocks/{symbol}/warnings"))
+
+    def get_price_limits(self, symbol: str) -> Any:
+        return _result(
+            self._request(
+                "GET",
+                "/api/v1/price-limits",
+                params={"symbol": symbol},
+            )
+        )
+
+    def get_market_calendar(self, market: str) -> Any:
+        market = market.upper()
+        if market not in {"KR", "US"}:
+            raise ValueError("market must be KR or US")
+        return _result(self._request("GET", f"/api/v1/market-calendar/{market}"))
+
+    def get_orders(
+        self,
+        *,
+        account_seq: int | str,
+        status: str,
+        symbol: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> Any:
+        params: dict[str, Any] = {"status": status}
+        if symbol:
+            params["symbol"] = symbol
+        if limit is not None:
+            params["limit"] = limit
+        if cursor:
+            params["cursor"] = cursor
+        return _result(
+            self._request(
+                "GET",
+                "/api/v1/orders",
+                params=params,
+                account_seq=account_seq,
+            )
+        )
+
     def create_order(self, *, account_seq: int | str, payload: dict[str, Any]) -> Any:
         return _result(self._request("POST", "/api/v1/orders", json=payload, account_seq=account_seq))
 
