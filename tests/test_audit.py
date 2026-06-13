@@ -108,3 +108,45 @@ def test_audit_store_records_reconciliation_report(tmp_path):
     assert report["accountSeq"] == "7"
     assert report["symbol"] == "005930"
     assert report["report"]["matchedOpenOrderIds"] == ["order-1"]
+
+
+def test_audit_store_returns_run_detail_with_nested_records(tmp_path):
+    audit = AuditStore(tmp_path / "audit.sqlite3")
+    run_id = audit.start_run(mode="paper", config_path="strategy.toml")
+    intent_id = audit.record_intent(
+        run_id=run_id,
+        symbol="005930",
+        side="BUY",
+        payload={"symbol": "005930"},
+    )
+    audit.record_check(
+        run_id=run_id,
+        intent_id=intent_id,
+        stage="risk",
+        name="allowed_symbol",
+        status="PASS",
+        reason="allowed",
+        evidence={"allowedSymbols": ["005930"]},
+    )
+    audit.record_execution(
+        run_id=run_id,
+        intent_id=intent_id,
+        mode="paper",
+        status="FILLED",
+        result={"fillId": "fill-1"},
+        notional="70000",
+    )
+    audit.complete_run(run_id=run_id, status="COMPLETED")
+
+    detail = audit.run_detail(run_id)
+
+    assert detail["run"]["id"] == run_id
+    assert detail["intents"][0]["payload"]["symbol"] == "005930"
+    assert detail["checks"][0]["evidence"]["allowedSymbols"] == ["005930"]
+    assert detail["executions"][0]["result"]["fillId"] == "fill-1"
+
+
+def test_audit_store_returns_none_for_missing_run_detail(tmp_path):
+    audit = AuditStore(tmp_path / "audit.sqlite3")
+
+    assert audit.run_detail(999) is None

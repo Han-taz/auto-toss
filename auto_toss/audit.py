@@ -229,6 +229,125 @@ class AuditStore:
             for row in rows
         ]
 
+    def run(self, run_id: int) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            _create_schema(connection)
+            row = connection.execute(
+                """
+                SELECT id, mode, config_path, status, started_at, completed_at
+                FROM runs
+                WHERE id = ?
+                """,
+                (run_id,),
+            ).fetchone()
+
+        return _run_row(row) if row is not None else None
+
+    def intents(
+        self,
+        *,
+        run_id: int | None = None,
+        limit: int | None = 50,
+    ) -> list[dict[str, Any]]:
+        query = """
+            SELECT id, run_id, symbol, side, payload_json, created_at
+            FROM intents
+        """
+        conditions = []
+        params: list[Any] = []
+        if run_id is not None:
+            conditions.append("run_id = ?")
+            params.append(run_id)
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        query += " ORDER BY id"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+
+        with self._connect() as connection:
+            _create_schema(connection)
+            rows = connection.execute(query, params).fetchall()
+
+        return [_intent_row(row) for row in rows]
+
+    def checks(
+        self,
+        *,
+        run_id: int | None = None,
+        intent_id: int | None = None,
+        limit: int | None = 50,
+    ) -> list[dict[str, Any]]:
+        query = """
+            SELECT id, run_id, intent_id, stage, name, status, reason,
+                   evidence_json, created_at
+            FROM checks
+        """
+        conditions = []
+        params: list[Any] = []
+        if run_id is not None:
+            conditions.append("run_id = ?")
+            params.append(run_id)
+        if intent_id is not None:
+            conditions.append("intent_id = ?")
+            params.append(intent_id)
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        query += " ORDER BY id"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+
+        with self._connect() as connection:
+            _create_schema(connection)
+            rows = connection.execute(query, params).fetchall()
+
+        return [_check_row(row) for row in rows]
+
+    def executions(
+        self,
+        *,
+        run_id: int | None = None,
+        intent_id: int | None = None,
+        limit: int | None = 50,
+    ) -> list[dict[str, Any]]:
+        query = """
+            SELECT id, run_id, intent_id, mode, status, notional,
+                   result_json, created_at
+            FROM executions
+        """
+        conditions = []
+        params: list[Any] = []
+        if run_id is not None:
+            conditions.append("run_id = ?")
+            params.append(run_id)
+        if intent_id is not None:
+            conditions.append("intent_id = ?")
+            params.append(intent_id)
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        query += " ORDER BY id"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+
+        with self._connect() as connection:
+            _create_schema(connection)
+            rows = connection.execute(query, params).fetchall()
+
+        return [_execution_row(row) for row in rows]
+
+    def run_detail(self, run_id: int) -> dict[str, Any] | None:
+        run = self.run(run_id)
+        if run is None:
+            return None
+        return {
+            "run": run,
+            "intents": self.intents(run_id=run_id, limit=None),
+            "checks": self.checks(run_id=run_id, limit=None),
+            "executions": self.executions(run_id=run_id, limit=None),
+        }
+
     def runs(self) -> list[dict[str, Any]]:
         with self._connect() as connection:
             _create_schema(connection)
@@ -367,3 +486,52 @@ def _json_value(value: str) -> Any:
         return json.loads(value)
     except json.JSONDecodeError:
         return {}
+
+
+def _run_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "mode": row["mode"],
+        "configPath": row["config_path"],
+        "status": row["status"],
+        "startedAt": row["started_at"],
+        "completedAt": row["completed_at"],
+    }
+
+
+def _intent_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "runId": row["run_id"],
+        "symbol": row["symbol"],
+        "side": row["side"],
+        "payload": _json_value(row["payload_json"]),
+        "createdAt": row["created_at"],
+    }
+
+
+def _check_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "runId": row["run_id"],
+        "intentId": row["intent_id"],
+        "stage": row["stage"],
+        "name": row["name"],
+        "status": row["status"],
+        "reason": row["reason"],
+        "evidence": _json_value(row["evidence_json"]),
+        "createdAt": row["created_at"],
+    }
+
+
+def _execution_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "runId": row["run_id"],
+        "intentId": row["intent_id"],
+        "mode": row["mode"],
+        "status": row["status"],
+        "notional": row["notional"],
+        "result": _json_value(row["result_json"]),
+        "createdAt": row["created_at"],
+    }
