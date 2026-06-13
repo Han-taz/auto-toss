@@ -151,6 +151,41 @@ class TossClient:
             )
         )
 
+    def get_order(self, *, account_seq: int | str, order_id: str) -> Any:
+        return _result(
+            self._request(
+                "GET",
+                f"/api/v1/orders/{order_id}",
+                account_seq=account_seq,
+            )
+        )
+
+    def modify_order(
+        self,
+        *,
+        account_seq: int | str,
+        order_id: str,
+        payload: dict[str, Any],
+    ) -> Any:
+        return _result(
+            self._request(
+                "POST",
+                f"/api/v1/orders/{order_id}/modify",
+                json=payload,
+                account_seq=account_seq,
+            )
+        )
+
+    def cancel_order(self, *, account_seq: int | str, order_id: str) -> Any:
+        return _result(
+            self._request(
+                "POST",
+                f"/api/v1/orders/{order_id}/cancel",
+                json={},
+                account_seq=account_seq,
+            )
+        )
+
     def create_order(self, *, account_seq: int | str, payload: dict[str, Any]) -> Any:
         return _result(self._request("POST", "/api/v1/orders", json=payload, account_seq=account_seq))
 

@@ -129,6 +129,34 @@ def test_safety_read_endpoints_use_account_header_where_required():
 
 
 @respx.mock
+def test_order_lifecycle_methods_use_account_header_and_payloads():
+    mock_token()
+    detail = respx.get("https://toss.example.test/api/v1/orders/order-1").mock(
+        return_value=httpx.Response(200, json={"result": {"orderId": "order-1"}})
+    )
+    modify = respx.post("https://toss.example.test/api/v1/orders/order-1/modify").mock(
+        return_value=httpx.Response(200, json={"result": {"orderId": "order-2"}})
+    )
+    cancel = respx.post("https://toss.example.test/api/v1/orders/order-1/cancel").mock(
+        return_value=httpx.Response(200, json={"result": {"orderId": "order-3"}})
+    )
+    client = TossClient(make_config())
+
+    assert client.get_order(account_seq=7, order_id="order-1") == {"orderId": "order-1"}
+    assert client.modify_order(
+        account_seq=7,
+        order_id="order-1",
+        payload={"orderType": "LIMIT", "quantity": "1", "price": "70000"},
+    ) == {"orderId": "order-2"}
+    assert client.cancel_order(account_seq=7, order_id="order-1") == {"orderId": "order-3"}
+
+    assert detail.calls[0].request.headers["X-Tossinvest-Account"] == "7"
+    assert modify.calls[0].request.headers["X-Tossinvest-Account"] == "7"
+    assert cancel.calls[0].request.headers["X-Tossinvest-Account"] == "7"
+    assert cancel.calls[0].request.read() == b"{}"
+
+
+@respx.mock
 def test_create_order_posts_payload_with_account_header():
     mock_token()
     route = respx.post("https://toss.example.test/api/v1/orders").mock(
