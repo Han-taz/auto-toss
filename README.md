@@ -67,6 +67,57 @@ uv run auto-toss holdings --account 1
 uv run auto-toss holdings --account 1 --symbol AAPL
 ```
 
+## Paper Trading
+
+Paper trading is local-only. It does not call Toss order APIs and writes simulated fills to SQLite.
+
+Default paper trading database:
+
+```text
+.auto_toss/paper_trading.sqlite3
+```
+
+Initialize the local paper account:
+
+```bash
+uv run auto-toss paper-init --reset
+```
+
+Default starting cash:
+
+- KRW `10000000`
+- USD `10000`
+
+Use custom starting cash:
+
+```bash
+uv run auto-toss paper-init --reset --krw-cash 5000000 --usd-cash 5000
+```
+
+Execute a simulated fill:
+
+```bash
+uv run auto-toss paper-order \
+  --symbol 005930 \
+  --side BUY \
+  --currency KRW \
+  --quantity 1 \
+  --fill-price 70000
+```
+
+Inspect portfolio state:
+
+```bash
+uv run auto-toss paper-portfolio
+uv run auto-toss paper-portfolio --mark-price 005930=71000
+```
+
+Inspect fill ledger:
+
+```bash
+uv run auto-toss paper-ledger
+```
+
 Preview a limit order without submitting it:
 
 ```bash
