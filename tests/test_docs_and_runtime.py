@@ -39,3 +39,19 @@ def test_documentation_policy_requires_fresh_docs_after_work():
 
     assert "Documentation updates are mandatory after every behavior" in policy
     assert "not complete until docs are updated" in policy
+
+
+def test_auto_trading_docs_exist_and_runtime_state_is_ignored():
+    required = [
+        "docs/llm-wiki/work-units/2026-06-13-auto-trading-safety-core.md",
+        "docs/llm-wiki/architecture/auto-trading-safety-core.md",
+        "docs/llm-wiki/classes/strategy-runner.md",
+        "docs/llm-wiki/classes/risk-and-preflight.md",
+        "docs/llm-wiki/infra/auto-trading-audit-db.md",
+        "docs/llm-wiki/dead-ends/2026-06-13-auto-trading-safety-core.md",
+    ]
+
+    missing = [path for path in required if not (PROJECT_ROOT / path).is_file()]
+
+    assert missing == []
+    assert ".auto_toss/" in (PROJECT_ROOT / ".gitignore").read_text(encoding="utf-8")

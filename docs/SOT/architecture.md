@@ -7,7 +7,7 @@ Change it only when system boundaries or core architecture change.
 
 `auto-toss` is a Python CLI for Toss Securities Open API workflows and local trading simulation.
 
-The system has two separate execution paths:
+The system has three separate execution paths:
 
 1. Toss API path
    - Uses OAuth2 Client Credentials.
@@ -20,6 +20,13 @@ The system has two separate execution paths:
    - Never calls Toss order APIs.
    - May be paired with Toss market-data commands by the user, but fills are explicit local simulations.
 
+3. Automated strategy path
+   - Uses `run-strategy` to load TOML strategy intents.
+   - Runs local risk checks, Toss read-only preflight checks, execution routing, and audit recording.
+   - Defaults to paper execution.
+   - Live execution requires `TOSS_LIVE_TRADING=true`, `--mode live`, `--live`, `--account`, passing risk checks, and passing preflight checks.
+   - Rejected or skipped intents are audit records, not live orders.
+
 ## Core Modules
 
 - `auto_toss.cli`: command-line parsing, JSON output, workflow wiring.
@@ -27,6 +34,12 @@ The system has two separate execution paths:
 - `auto_toss.client`: Toss Open API HTTP client.
 - `auto_toss.orders`: Toss order payload validation and live-trading gate.
 - `auto_toss.paper`: local SQLite paper trading broker.
+- `auto_toss.strategy`: TOML strategy config and order intent model.
+- `auto_toss.risk`: local kill switch, symbol allowlist, notional, and daily limit checks.
+- `auto_toss.preflight`: Toss read-only eligibility checks before execution.
+- `auto_toss.execution`: paper/live execution routing.
+- `auto_toss.audit`: local SQLite run, check, and execution audit storage.
+- `auto_toss.runner`: strategy run orchestration.
 
 ## Storage
 
@@ -35,6 +48,7 @@ Runtime state is local and ignored by Git:
 - `.env`: Toss credentials.
 - `.auto_toss/`: local app runtime state.
 - `.auto_toss/paper_trading.sqlite3`: default paper trading database.
+- `.auto_toss/auto_trading.sqlite3`: default automated strategy audit database.
 
 ## Documentation Boundary
 

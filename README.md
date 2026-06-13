@@ -118,6 +118,73 @@ Inspect fill ledger:
 uv run auto-toss paper-ledger
 ```
 
+## Automated Strategy Runs
+
+`run-strategy` executes declarative TOML strategy intents through the safety
+pipeline:
+
+```text
+Strategy config -> Risk checks -> Preflight checks -> Execution -> Audit
+```
+
+Paper mode is the default. It uses Toss market-data reads for prices and
+preflight evidence, then routes approved fills to the local paper broker:
+
+```bash
+uv run auto-toss run-strategy --config strategy.toml --mode paper --once
+```
+
+Default audit database:
+
+```text
+.auto_toss/auto_trading.sqlite3
+```
+
+Minimal strategy example:
+
+```toml
+[risk]
+max_order_amount = "100000"
+max_daily_notional = "300000"
+max_daily_orders = 5
+allowed_symbols = ["005930", "AAPL"]
+kill_switch_file = ".auto_toss/KILL_SWITCH"
+
+[[intents]]
+symbol = "005930"
+side = "BUY"
+currency = "KRW"
+order_type = "LIMIT"
+quantity = "1"
+price = "70000"
+client_order_id = "demo-005930-buy-1"
+
+[intents.trigger]
+kind = "last_price_at_or_below"
+price = "70500"
+```
+
+Supported trigger kinds:
+
+- `always`
+- `last_price_at_or_below`
+- `last_price_at_or_above`
+
+Live strategy execution requires all live gates and preflight checks:
+
+```bash
+uv run auto-toss run-strategy \
+  --config strategy.toml \
+  --mode live \
+  --live \
+  --account 1 \
+  --once
+```
+
+If `TOSS_LIVE_TRADING=true` is not set, `--live` is missing, or risk/preflight
+checks reject an intent, the runner records the decision and does not submit a
+live order.
+
 Preview a limit order without submitting it:
 
 ```bash
