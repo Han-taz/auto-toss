@@ -7,7 +7,7 @@ Change it only when system boundaries or core architecture change.
 
 `auto-toss` is a Python CLI for Toss Securities Open API workflows and local trading simulation.
 
-The system has three separate execution paths:
+The system has separate execution paths:
 
 1. Toss API path
    - Uses OAuth2 Client Credentials.
@@ -33,6 +33,12 @@ The system has three separate execution paths:
    - Records local lifecycle events and reconciliation reports in the automated trading audit database.
    - Reconciliation treats Toss `OPEN` orders as the primary broker truth and compares them with locally audited live submissions.
 
+5. Audit reporting path
+   - Uses `audit-runs`, `audit-run`, `audit-order-events`, `audit-reconciliations`, and `audit-summary`.
+   - Reads only the local automated trading audit database.
+   - Does not require Toss API credentials.
+   - Does not mutate local or remote trading state.
+
 ## Core Modules
 
 - `auto_toss.cli`: command-line parsing, JSON output, workflow wiring.
@@ -41,6 +47,7 @@ The system has three separate execution paths:
 - `auto_toss.orders`: Toss order payload validation and live-trading gate.
 - `auto_toss.lifecycle`: order modify/cancel validation, dispatch, and lifecycle event recording.
 - `auto_toss.reconciliation`: local-vs-broker open order comparison.
+- `auto_toss.reporting`: JSON-friendly read-only audit report facade.
 - `auto_toss.paper`: local SQLite paper trading broker.
 - `auto_toss.strategy`: TOML strategy config and order intent model.
 - `auto_toss.risk`: local kill switch, symbol allowlist, notional, and daily limit checks.
@@ -56,7 +63,7 @@ Runtime state is local and ignored by Git:
 - `.env`: Toss credentials.
 - `.auto_toss/`: local app runtime state.
 - `.auto_toss/paper_trading.sqlite3`: default paper trading database.
-- `.auto_toss/auto_trading.sqlite3`: default automated strategy and order lifecycle audit database.
+- `.auto_toss/auto_trading.sqlite3`: default automated strategy, order lifecycle, and reporting audit database.
 
 ## Documentation Boundary
 

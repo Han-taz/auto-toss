@@ -30,6 +30,19 @@ values are stored as decimal strings.
 the risk engine to enforce daily order and notional limits from local execution
 history.
 
+## Reporting
+
+Read-only CLI commands expose audit data without loading Toss API credentials:
+
+- `audit-runs`
+- `audit-run`
+- `audit-order-events`
+- `audit-reconciliations`
+- `audit-summary`
+
+These commands call `auto_toss.reporting`, which delegates SQL ownership to
+`AuditStore`.
+
 ## Operational Notes
 
 Deleting the audit DB removes local daily limit history. Do not delete it during

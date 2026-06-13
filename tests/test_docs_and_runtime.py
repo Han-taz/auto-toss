@@ -69,3 +69,16 @@ def test_order_lifecycle_docs_exist():
     missing = [path for path in required if not (PROJECT_ROOT / path).is_file()]
 
     assert missing == []
+
+
+def test_audit_reporting_docs_exist():
+    required = [
+        "docs/llm-wiki/work-units/2026-06-13-audit-reporting-cli.md",
+        "docs/llm-wiki/architecture/audit-reporting-cli.md",
+        "docs/llm-wiki/classes/audit-reporting.md",
+        "docs/llm-wiki/dead-ends/2026-06-13-audit-reporting-cli.md",
+    ]
+
+    missing = [path for path in required if not (PROJECT_ROOT / path).is_file()]
+
+    assert missing == []

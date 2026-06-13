@@ -161,6 +161,25 @@ Default audit database:
 .auto_toss/auto_trading.sqlite3
 ```
 
+## Audit Reporting
+
+Audit reporting commands read the local audit database and do not require Toss
+API credentials:
+
+```bash
+uv run auto-toss audit-runs
+uv run auto-toss audit-run --run-id 1
+uv run auto-toss audit-order-events
+uv run auto-toss audit-reconciliations
+uv run auto-toss audit-summary
+```
+
+Use `--db-path` to inspect a non-default audit database:
+
+```bash
+uv run auto-toss audit-runs --db-path .auto_toss/auto_trading.sqlite3 --limit 20
+```
+
 Minimal strategy example:
 
 ```toml
