@@ -67,6 +67,27 @@ uv run auto-toss holdings --account 1
 uv run auto-toss holdings --account 1 --symbol AAPL
 ```
 
+## Order Lookup And Reconciliation
+
+Order lookup commands are read-only and do not require `--live`:
+
+```bash
+uv run auto-toss orders --account 1 --status OPEN
+uv run auto-toss orders --account 1 --status OPEN --symbol 005930 --limit 20
+uv run auto-toss order-detail --account 1 --order-id order-id-from-toss
+```
+
+Open-order reconciliation compares Toss `OPEN` orders with locally audited live
+submissions:
+
+```bash
+uv run auto-toss reconcile-orders --account 1
+uv run auto-toss reconcile-orders --account 1 --symbol 005930
+```
+
+Use `OPEN` as the primary reconciliation status. Some Toss environments may not
+support `CLOSED` order queries consistently.
+
 ## Paper Trading
 
 Paper trading is local-only. It does not call Toss order APIs and writes simulated fills to SQLite.
@@ -229,6 +250,31 @@ uv run auto-toss place-order \
 ```
 
 If either gate is missing, the command exits without submitting an order.
+
+Cancel and modify use the same live gates and write order lifecycle events to
+`.auto_toss/auto_trading.sqlite3` by default:
+
+```bash
+uv run auto-toss cancel-order \
+  --live \
+  --account 1 \
+  --order-id order-id-from-toss
+```
+
+```bash
+uv run auto-toss modify-order \
+  --live \
+  --account 1 \
+  --order-id order-id-from-toss \
+  --symbol 005930 \
+  --order-type LIMIT \
+  --quantity 1 \
+  --price 70000
+```
+
+For Korean symbols, Toss modify requests require `quantity`. For US symbols,
+modify requests reject `quantity`. `LIMIT` modifies require `price`; `MARKET`
+modifies must not include `price`.
 
 ## Safety Notes
 

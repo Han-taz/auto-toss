@@ -12,8 +12,8 @@ The system has three separate execution paths:
 1. Toss API path
    - Uses OAuth2 Client Credentials.
    - Reads market/account data from Toss Securities Open API.
-   - Can submit live orders only through `place-order`.
-   - Live orders require both `TOSS_LIVE_TRADING=true` and `--live`.
+   - Can submit live order create, modify, and cancel operations only through explicit CLI commands.
+   - Live order writes require both `TOSS_LIVE_TRADING=true` and `--live`.
 
 2. Paper trading path
    - Uses local SQLite only.
@@ -27,18 +27,26 @@ The system has three separate execution paths:
    - Live execution requires `TOSS_LIVE_TRADING=true`, `--mode live`, `--live`, `--account`, passing risk checks, and passing preflight checks.
    - Rejected or skipped intents are audit records, not live orders.
 
+4. Order lifecycle path
+   - Uses `orders`, `order-detail`, and `reconcile-orders` for read-only order inspection.
+   - Uses `cancel-order` and `modify-order` for live order lifecycle writes.
+   - Records local lifecycle events and reconciliation reports in the automated trading audit database.
+   - Reconciliation treats Toss `OPEN` orders as the primary broker truth and compares them with locally audited live submissions.
+
 ## Core Modules
 
 - `auto_toss.cli`: command-line parsing, JSON output, workflow wiring.
 - `auto_toss.config`: environment configuration and credential loading.
 - `auto_toss.client`: Toss Open API HTTP client.
 - `auto_toss.orders`: Toss order payload validation and live-trading gate.
+- `auto_toss.lifecycle`: order modify/cancel validation, dispatch, and lifecycle event recording.
+- `auto_toss.reconciliation`: local-vs-broker open order comparison.
 - `auto_toss.paper`: local SQLite paper trading broker.
 - `auto_toss.strategy`: TOML strategy config and order intent model.
 - `auto_toss.risk`: local kill switch, symbol allowlist, notional, and daily limit checks.
 - `auto_toss.preflight`: Toss read-only eligibility checks before execution.
 - `auto_toss.execution`: paper/live execution routing.
-- `auto_toss.audit`: local SQLite run, check, and execution audit storage.
+- `auto_toss.audit`: local SQLite run, check, execution, lifecycle event, and reconciliation storage.
 - `auto_toss.runner`: strategy run orchestration.
 
 ## Storage
@@ -48,7 +56,7 @@ Runtime state is local and ignored by Git:
 - `.env`: Toss credentials.
 - `.auto_toss/`: local app runtime state.
 - `.auto_toss/paper_trading.sqlite3`: default paper trading database.
-- `.auto_toss/auto_trading.sqlite3`: default automated strategy audit database.
+- `.auto_toss/auto_trading.sqlite3`: default automated strategy and order lifecycle audit database.
 
 ## Documentation Boundary
 

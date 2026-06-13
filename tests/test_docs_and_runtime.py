@@ -55,3 +55,17 @@ def test_auto_trading_docs_exist_and_runtime_state_is_ignored():
 
     assert missing == []
     assert ".auto_toss/" in (PROJECT_ROOT / ".gitignore").read_text(encoding="utf-8")
+
+
+def test_order_lifecycle_docs_exist():
+    required = [
+        "docs/llm-wiki/work-units/2026-06-13-order-lifecycle-reliability.md",
+        "docs/llm-wiki/architecture/order-lifecycle-reliability.md",
+        "docs/llm-wiki/classes/order-lifecycle-service.md",
+        "docs/llm-wiki/classes/reconciliation.md",
+        "docs/llm-wiki/dead-ends/2026-06-13-order-lifecycle-reliability.md",
+    ]
+
+    missing = [path for path in required if not (PROJECT_ROOT / path).is_file()]
+
+    assert missing == []
