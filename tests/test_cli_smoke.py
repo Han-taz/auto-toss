@@ -18,4 +18,9 @@ def test_parser_has_expected_commands():
         "preview-order",
         "place-order",
         "run-strategy",
+        "orders",
+        "order-detail",
+        "cancel-order",
+        "modify-order",
+        "reconcile-orders",
     } <= set(commands)

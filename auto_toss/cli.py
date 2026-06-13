@@ -9,6 +9,7 @@ from auto_toss.client import TossClient
 from auto_toss.config import Config, ConfigError
 from auto_toss.errors import TossApiError
 from auto_toss.execution import ExecutionError
+from auto_toss.lifecycle import OrderLifecycleService, OrderModifyRequest, build_modify_payload
 from auto_toss.orders import (
     LiveTradingNotEnabled,
     OrderRequest,
@@ -17,6 +18,7 @@ from auto_toss.orders import (
     build_order_payload,
 )
 from auto_toss.paper import PaperBroker, PaperTradingError
+from auto_toss.reconciliation import reconcile_open_orders
 from auto_toss.runner import StrategyRunner
 from auto_toss.strategy import StrategyConfigError
 
@@ -47,6 +49,17 @@ def build_parser() -> argparse.ArgumentParser:
     holdings = subparsers.add_parser("holdings", help="Fetch account holdings")
     holdings.add_argument("--account", required=True)
     holdings.add_argument("--symbol")
+
+    orders = subparsers.add_parser("orders", help="Fetch account orders")
+    orders.add_argument("--account", required=True)
+    orders.add_argument("--status", required=True, choices=["OPEN", "CLOSED"])
+    orders.add_argument("--symbol")
+    orders.add_argument("--limit", type=_positive_int)
+    orders.add_argument("--cursor")
+
+    order_detail = subparsers.add_parser("order-detail", help="Fetch one account order")
+    order_detail.add_argument("--account", required=True)
+    order_detail.add_argument("--order-id", required=True)
 
     paper_init = subparsers.add_parser(
         "paper-init",
@@ -97,6 +110,37 @@ def build_parser() -> argparse.ArgumentParser:
     place_order.add_argument("--account", required=True)
     _add_order_arguments(place_order)
 
+    cancel_order = subparsers.add_parser(
+        "cancel-order",
+        help="Cancel a live order when live trading is enabled",
+    )
+    cancel_order.add_argument("--live", action="store_true")
+    cancel_order.add_argument("--account", required=True)
+    cancel_order.add_argument("--order-id", required=True)
+    cancel_order.add_argument("--db-path", default=None)
+
+    modify_order = subparsers.add_parser(
+        "modify-order",
+        help="Modify a live order when live trading is enabled",
+    )
+    modify_order.add_argument("--live", action="store_true")
+    modify_order.add_argument("--account", required=True)
+    modify_order.add_argument("--order-id", required=True)
+    modify_order.add_argument("--symbol", required=True)
+    modify_order.add_argument("--order-type", required=True, choices=["LIMIT", "MARKET"])
+    modify_order.add_argument("--quantity")
+    modify_order.add_argument("--price")
+    modify_order.add_argument("--confirm-high-value-order", action="store_true")
+    modify_order.add_argument("--db-path", default=None)
+
+    reconcile_orders = subparsers.add_parser(
+        "reconcile-orders",
+        help="Compare broker open orders with local live submissions",
+    )
+    reconcile_orders.add_argument("--account", required=True)
+    reconcile_orders.add_argument("--symbol")
+    reconcile_orders.add_argument("--db-path", default=None)
+
     run_strategy = subparsers.add_parser(
         "run-strategy",
         help="Run a strategy through risk, preflight, execution, and audit",
@@ -122,6 +166,8 @@ def main(
     client_factory: Callable[[Config], TossClient] = TossClient,
     paper_broker_factory: Callable[[str | None], PaperBroker] | None = None,
     runner_factory: Callable[..., StrategyRunner] | None = None,
+    lifecycle_service_factory: Callable[..., OrderLifecycleService] | None = None,
+    reconciliation_factory: Callable[..., dict[str, object]] | None = None,
     sleep: Callable[[float], None] | None = None,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
@@ -131,6 +177,8 @@ def main(
     sleep = sleep or time.sleep
     paper_broker_factory = paper_broker_factory or _build_paper_broker
     runner_factory = runner_factory or StrategyRunner
+    lifecycle_service_factory = lifecycle_service_factory or OrderLifecycleService
+    reconciliation_factory = reconciliation_factory or reconcile_open_orders
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -199,6 +247,22 @@ def main(
                 client.get_holdings(account_seq=args.account, symbol=args.symbol),
                 stdout,
             )
+        elif args.command == "orders":
+            _print_json(
+                client.get_orders(
+                    account_seq=args.account,
+                    status=args.status,
+                    symbol=args.symbol,
+                    limit=args.limit,
+                    cursor=args.cursor,
+                ),
+                stdout,
+            )
+        elif args.command == "order-detail":
+            _print_json(
+                client.get_order(account_seq=args.account, order_id=args.order_id),
+                stdout,
+            )
         elif args.command == "place-order":
             assert_live_order_allowed(
                 config_live_enabled=config.live_trading_enabled,
@@ -206,6 +270,51 @@ def main(
             )
             payload = build_order_payload(_order_request_from_args(args))
             _print_json(client.create_order(account_seq=args.account, payload=payload), stdout)
+        elif args.command == "cancel-order":
+            assert_live_order_allowed(
+                config_live_enabled=config.live_trading_enabled,
+                cli_live=args.live,
+            )
+            lifecycle_service = lifecycle_service_factory(
+                client=client,
+                audit_store=AuditStore(args.db_path or DEFAULT_AUDIT_DB_PATH),
+            )
+            _print_json(
+                lifecycle_service.cancel_order(
+                    account_seq=args.account,
+                    order_id=args.order_id,
+                ),
+                stdout,
+            )
+        elif args.command == "modify-order":
+            assert_live_order_allowed(
+                config_live_enabled=config.live_trading_enabled,
+                cli_live=args.live,
+            )
+            modify_request = _modify_request_from_args(args)
+            build_modify_payload(modify_request)
+            lifecycle_service = lifecycle_service_factory(
+                client=client,
+                audit_store=AuditStore(args.db_path or DEFAULT_AUDIT_DB_PATH),
+            )
+            _print_json(
+                lifecycle_service.modify_order(
+                    account_seq=args.account,
+                    order_id=args.order_id,
+                    request=modify_request,
+                ),
+                stdout,
+            )
+        elif args.command == "reconcile-orders":
+            _print_json(
+                reconciliation_factory(
+                    client=client,
+                    audit_store=AuditStore(args.db_path or DEFAULT_AUDIT_DB_PATH),
+                    account_seq=args.account,
+                    symbol=args.symbol,
+                ),
+                stdout,
+            )
         elif args.command == "run-strategy":
             if args.mode == "live":
                 assert_live_order_allowed(
@@ -280,6 +389,16 @@ def _order_request_from_args(args: argparse.Namespace) -> OrderRequest:
         order_amount=args.order_amount,
         time_in_force=args.time_in_force,
         client_order_id=args.client_order_id,
+        confirm_high_value_order=args.confirm_high_value_order,
+    )
+
+
+def _modify_request_from_args(args: argparse.Namespace) -> OrderModifyRequest:
+    return OrderModifyRequest(
+        symbol=args.symbol,
+        order_type=args.order_type,
+        quantity=args.quantity,
+        price=args.price,
         confirm_high_value_order=args.confirm_high_value_order,
     )
 
