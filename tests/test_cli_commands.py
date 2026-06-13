@@ -3,6 +3,7 @@ import json
 
 import pytest
 
+from auto_toss.audit import AuditStore
 from auto_toss.cli import main
 from auto_toss.config import Config
 from auto_toss.lifecycle import OrderModifyRequest
@@ -420,6 +421,98 @@ def test_reconcile_orders_calls_factory_and_prints_report():
     assert factory_calls[0]["client"] is fake_client
     assert factory_calls[0]["account_seq"] == "7"
     assert factory_calls[0]["symbol"] == "005930"
+
+
+def test_audit_runs_command_prints_recent_run_summaries_without_config(tmp_path):
+    audit_db = tmp_path / "audit.sqlite3"
+    audit = AuditStore(audit_db)
+    audit.start_run(mode="paper", config_path="strategy.toml")
+
+    def fail_config():
+        raise AssertionError("audit commands must not load Toss config")
+
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    exit_code = main(
+        ["audit-runs", "--db-path", str(audit_db), "--limit", "5"],
+        config_factory=fail_config,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 0
+    assert json.loads(stdout.getvalue())[0]["mode"] == "paper"
+
+
+def test_audit_run_command_prints_detail(tmp_path):
+    audit_db = tmp_path / "audit.sqlite3"
+    audit = AuditStore(audit_db)
+    run_id = audit.start_run(mode="paper", config_path="strategy.toml")
+
+    exit_code, stdout, _, _ = run_cli(
+        ["audit-run", "--db-path", str(audit_db), "--run-id", str(run_id)]
+    )
+
+    assert exit_code == 0
+    assert json.loads(stdout)["run"]["id"] == run_id
+
+
+def test_audit_run_missing_exits_nonzero(tmp_path):
+    exit_code, _, stderr, _ = run_cli(
+        ["audit-run", "--db-path", str(tmp_path / "audit.sqlite3"), "--run-id", "999"]
+    )
+
+    assert exit_code == 2
+    assert "Audit run not found" in stderr
+
+
+def test_audit_order_events_command_prints_events(tmp_path):
+    audit_db = tmp_path / "audit.sqlite3"
+    audit = AuditStore(audit_db)
+    audit.record_order_event(
+        event_type="CANCEL",
+        order_id="cancel-1",
+        source_order_id="order-1",
+        status="SUBMITTED",
+        payload={},
+        result={"orderId": "cancel-1"},
+    )
+
+    exit_code, stdout, _, _ = run_cli(
+        ["audit-order-events", "--db-path", str(audit_db), "--limit", "5"]
+    )
+
+    assert exit_code == 0
+    assert json.loads(stdout)[0]["eventType"] == "CANCEL"
+
+
+def test_audit_reconciliations_command_prints_reports(tmp_path):
+    audit_db = tmp_path / "audit.sqlite3"
+    audit = AuditStore(audit_db)
+    audit.record_reconciliation(
+        account_seq="7",
+        symbol="005930",
+        report={"matchedOpenOrderIds": ["order-1"]},
+    )
+
+    exit_code, stdout, _, _ = run_cli(
+        ["audit-reconciliations", "--db-path", str(audit_db), "--limit", "5"]
+    )
+
+    assert exit_code == 0
+    assert json.loads(stdout)[0]["report"]["matchedOpenOrderIds"] == ["order-1"]
+
+
+def test_audit_summary_command_prints_counts(tmp_path):
+    audit_db = tmp_path / "audit.sqlite3"
+    audit = AuditStore(audit_db)
+    run_id = audit.start_run(mode="paper", config_path="strategy.toml")
+    audit.complete_run(run_id=run_id, status="COMPLETED")
+
+    exit_code, stdout, _, _ = run_cli(["audit-summary", "--db-path", str(audit_db)])
+
+    assert exit_code == 0
+    assert json.loads(stdout)["runs"]["byStatus"] == {"COMPLETED": 1}
 
 
 def test_run_strategy_paper_invokes_runner(tmp_path):

@@ -19,6 +19,14 @@ from auto_toss.orders import (
 )
 from auto_toss.paper import PaperBroker, PaperTradingError
 from auto_toss.reconciliation import reconcile_open_orders
+from auto_toss.reporting import (
+    AuditReportError,
+    audit_summary,
+    order_events as audit_order_events,
+    recent_runs,
+    reconciliations as audit_reconciliations,
+    run_detail as audit_run_detail,
+)
 from auto_toss.runner import StrategyRunner
 from auto_toss.strategy import StrategyConfigError
 
@@ -141,6 +149,40 @@ def build_parser() -> argparse.ArgumentParser:
     reconcile_orders.add_argument("--symbol")
     reconcile_orders.add_argument("--db-path", default=None)
 
+    audit_runs = subparsers.add_parser(
+        "audit-runs",
+        help="List recent automated trading audit runs",
+    )
+    _add_audit_db_argument(audit_runs)
+    audit_runs.add_argument("--limit", type=_positive_int, default=20)
+
+    audit_run = subparsers.add_parser(
+        "audit-run",
+        help="Show one automated trading audit run with nested records",
+    )
+    _add_audit_db_argument(audit_run)
+    audit_run.add_argument("--run-id", type=_positive_int, required=True)
+
+    audit_order_events_parser = subparsers.add_parser(
+        "audit-order-events",
+        help="List recent order lifecycle audit events",
+    )
+    _add_audit_db_argument(audit_order_events_parser)
+    audit_order_events_parser.add_argument("--limit", type=_positive_int, default=20)
+
+    audit_reconciliations_parser = subparsers.add_parser(
+        "audit-reconciliations",
+        help="List recent open-order reconciliation reports",
+    )
+    _add_audit_db_argument(audit_reconciliations_parser)
+    audit_reconciliations_parser.add_argument("--limit", type=_positive_int, default=20)
+
+    audit_summary_parser = subparsers.add_parser(
+        "audit-summary",
+        help="Summarize automated trading audit records",
+    )
+    _add_audit_db_argument(audit_summary_parser)
+
     run_strategy = subparsers.add_parser(
         "run-strategy",
         help="Run a strategy through risk, preflight, execution, and audit",
@@ -222,6 +264,38 @@ def main(
         if args.command == "paper-ledger":
             broker = paper_broker_factory(args.db_path)
             _print_json(broker.ledger(limit=args.limit), stdout)
+            return 0
+
+        if args.command == "audit-runs":
+            _print_json(
+                recent_runs(_audit_store_from_args(args), limit=args.limit),
+                stdout,
+            )
+            return 0
+
+        if args.command == "audit-run":
+            _print_json(
+                audit_run_detail(_audit_store_from_args(args), run_id=args.run_id),
+                stdout,
+            )
+            return 0
+
+        if args.command == "audit-order-events":
+            _print_json(
+                audit_order_events(_audit_store_from_args(args), limit=args.limit),
+                stdout,
+            )
+            return 0
+
+        if args.command == "audit-reconciliations":
+            _print_json(
+                audit_reconciliations(_audit_store_from_args(args), limit=args.limit),
+                stdout,
+            )
+            return 0
+
+        if args.command == "audit-summary":
+            _print_json(audit_summary(_audit_store_from_args(args)), stdout)
             return 0
 
         config = config_factory()
@@ -345,6 +419,7 @@ def main(
     except KeyboardInterrupt:
         return 130
     except (
+        AuditReportError,
         ConfigError,
         ExecutionError,
         LiveTradingNotEnabled,
@@ -363,8 +438,16 @@ def _add_paper_db_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--db-path", default=None)
 
 
+def _add_audit_db_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--db-path", default=None)
+
+
 def _build_paper_broker(db_path: str | None = None) -> PaperBroker:
     return PaperBroker() if db_path is None else PaperBroker(db_path)
+
+
+def _audit_store_from_args(args: argparse.Namespace) -> AuditStore:
+    return AuditStore(args.db_path or DEFAULT_AUDIT_DB_PATH)
 
 
 def _add_order_arguments(parser: argparse.ArgumentParser) -> None:

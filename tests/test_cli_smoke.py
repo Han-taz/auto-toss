@@ -23,4 +23,9 @@ def test_parser_has_expected_commands():
         "cancel-order",
         "modify-order",
         "reconcile-orders",
+        "audit-runs",
+        "audit-run",
+        "audit-order-events",
+        "audit-reconciliations",
+        "audit-summary",
     } <= set(commands)
