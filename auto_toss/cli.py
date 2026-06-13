@@ -1,6 +1,7 @@
 import argparse
 import json
 import sys
+import time
 from typing import Callable, TextIO
 
 from auto_toss.client import TossClient
@@ -21,6 +22,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     prices = subparsers.add_parser("prices", help="Fetch current prices for symbols")
     prices.add_argument("symbols", nargs="+")
+
+    watch_prices = subparsers.add_parser(
+        "watch-prices",
+        help="Fetch current prices repeatedly until interrupted",
+    )
+    watch_prices.add_argument("symbols", nargs="+")
+    watch_prices.add_argument("--interval", type=_non_negative_float, default=5.0)
+    watch_prices.add_argument("--iterations", type=_positive_int)
 
     stocks = subparsers.add_parser("stocks", help="Fetch stock metadata for symbols")
     stocks.add_argument("symbols", nargs="+")
@@ -53,11 +62,13 @@ def main(
     *,
     config_factory: Callable[[], Config] = Config.from_env,
     client_factory: Callable[[Config], TossClient] = TossClient,
+    sleep: Callable[[float], None] | None = None,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
 ) -> int:
     stdout = stdout or sys.stdout
     stderr = stderr or sys.stderr
+    sleep = sleep or time.sleep
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -71,6 +82,15 @@ def main(
 
         if args.command == "prices":
             _print_json(client.get_prices(args.symbols), stdout)
+        elif args.command == "watch-prices":
+            _stream_price_snapshots(
+                client=client,
+                symbols=args.symbols,
+                stdout=stdout,
+                sleep=sleep,
+                interval=args.interval,
+                iterations=args.iterations,
+            )
         elif args.command == "stocks":
             _print_json(client.get_stocks(args.symbols), stdout)
         elif args.command == "accounts":
@@ -89,6 +109,8 @@ def main(
             _print_json(client.create_order(account_seq=args.account, payload=payload), stdout)
         else:
             parser.error(f"unknown command: {args.command}")
+    except KeyboardInterrupt:
+        return 130
     except (ConfigError, LiveTradingNotEnabled, OrderValidationError, TossApiError) as exc:
         print(str(exc), file=stderr)
         return 2
@@ -124,3 +146,53 @@ def _order_request_from_args(args: argparse.Namespace) -> OrderRequest:
 
 def _print_json(value: object, stdout: TextIO) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2), file=stdout)
+
+
+def _stream_price_snapshots(
+    *,
+    client: TossClient,
+    symbols: list[str],
+    stdout: TextIO,
+    sleep: Callable[[float], None],
+    interval: float,
+    iterations: int | None,
+) -> None:
+    sequence = 1
+    while iterations is None or sequence <= iterations:
+        print(
+            json.dumps(
+                {
+                    "sequence": sequence,
+                    "prices": client.get_prices(symbols),
+                },
+                ensure_ascii=False,
+            ),
+            file=stdout,
+            flush=True,
+        )
+
+        if iterations is not None and sequence >= iterations:
+            break
+
+        sleep(interval)
+        sequence += 1
+
+
+def _non_negative_float(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--interval must be a number") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("--interval must be non-negative")
+    return parsed
+
+
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--iterations must be an integer") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("--iterations must be positive")
+    return parsed

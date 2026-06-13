@@ -1,6 +1,8 @@
 import io
 import json
 
+import pytest
+
 from auto_toss.cli import main
 from auto_toss.config import Config
 
@@ -34,7 +36,7 @@ def make_config(*, live=False):
     )
 
 
-def run_cli(argv, *, live=False):
+def run_cli(argv, *, live=False, sleep=None):
     fake_client = FakeClient()
     stdout = io.StringIO()
     stderr = io.StringIO()
@@ -42,6 +44,7 @@ def run_cli(argv, *, live=False):
         argv,
         config_factory=lambda: make_config(live=live),
         client_factory=lambda config: fake_client,
+        sleep=sleep,
         stdout=stdout,
         stderr=stderr,
     )
@@ -54,6 +57,61 @@ def test_prices_command_prints_json_result():
     assert exit_code == 0
     assert json.loads(stdout) == [{"symbol": "005930"}, {"symbol": "AAPL"}]
     assert fake_client.calls == [("get_prices", ["005930", "AAPL"])]
+
+
+def test_watch_prices_streams_json_snapshots_for_each_iteration():
+    sleeps = []
+
+    exit_code, stdout, _, fake_client = run_cli(
+        ["watch-prices", "005930", "AAPL", "--iterations", "2", "--interval", "1.25"],
+        sleep=sleeps.append,
+    )
+
+    assert exit_code == 0
+    assert [json.loads(line) for line in stdout.splitlines()] == [
+        {
+            "sequence": 1,
+            "prices": [{"symbol": "005930"}, {"symbol": "AAPL"}],
+        },
+        {
+            "sequence": 2,
+            "prices": [{"symbol": "005930"}, {"symbol": "AAPL"}],
+        },
+    ]
+    assert fake_client.calls == [
+        ("get_prices", ["005930", "AAPL"]),
+        ("get_prices", ["005930", "AAPL"]),
+    ]
+    assert sleeps == [1.25]
+
+
+def test_watch_prices_returns_130_when_interrupted_between_polls():
+    def interrupt(_seconds):
+        raise KeyboardInterrupt
+
+    exit_code, stdout, _, fake_client = run_cli(
+        ["watch-prices", "005930", "--interval", "1"],
+        sleep=interrupt,
+    )
+
+    assert exit_code == 130
+    assert json.loads(stdout) == {
+        "sequence": 1,
+        "prices": [{"symbol": "005930"}],
+    }
+    assert fake_client.calls == [("get_prices", ["005930"])]
+
+
+def test_watch_prices_rejects_negative_interval(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        main(
+            ["watch-prices", "005930", "--interval", "-0.1"],
+            config_factory=lambda: make_config(),
+            client_factory=lambda config: FakeClient(),
+        )
+
+    assert exc_info.value.code == 2
+    assert "--interval must be non-negative" in capsys.readouterr().err
 
 
 def test_accounts_command_prints_json_result():

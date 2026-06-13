@@ -36,6 +36,18 @@ Fetch current prices for Korean and US symbols in one command:
 uv run auto-toss prices 005930 AAPL
 ```
 
+Watch near-realtime prices by polling the current-price API:
+
+```bash
+uv run auto-toss watch-prices 005930 AAPL
+```
+
+Run a bounded watch for scripts or tests:
+
+```bash
+uv run auto-toss watch-prices 005930 AAPL --interval 1 --iterations 5
+```
+
 Fetch stock metadata:
 
 ```bash
