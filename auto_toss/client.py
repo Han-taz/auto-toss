@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import time
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -9,10 +10,26 @@ from auto_toss.config import Config
 from auto_toss.errors import TossApiError, TossAuthError, TossRateLimitError
 
 
+@dataclass(frozen=True)
+class RetryPolicy:
+    max_attempts: int = 1
+    base_delay: float = 1.0
+    max_delay: float = 4.0
+
+
 class TossClient:
-    def __init__(self, config: Config, *, http_client: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        config: Config,
+        *,
+        http_client: httpx.Client | None = None,
+        retry_policy: RetryPolicy | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
         self.config = config
         self._client = http_client or httpx.Client(base_url=config.base_url, timeout=10.0)
+        self._retry_policy = retry_policy or RetryPolicy()
+        self._sleep = sleep
         self._access_token: str | None = None
         self._token_expires_at = 0.0
 
@@ -61,16 +78,23 @@ class TossClient:
         if account_seq is not None:
             headers["X-Tossinvest-Account"] = str(account_seq)
 
-        response = self._client.request(
-            method,
-            path,
-            params=params,
-            json=json,
-            headers=headers,
-        )
-        if response.status_code >= 400:
-            self._raise_api_error(response)
-        return response.json()
+        max_attempts = max(self._retry_policy.max_attempts, 1)
+        for attempt in range(1, max_attempts + 1):
+            response = self._client.request(
+                method,
+                path,
+                params=params,
+                json=json,
+                headers=headers,
+            )
+            if response.status_code != 429 or attempt >= max_attempts:
+                if response.status_code >= 400:
+                    self._raise_api_error(response)
+                return response.json()
+
+            self._sleep(_retry_delay(response, self._retry_policy, attempt))
+
+        raise RuntimeError("unreachable retry state")
 
     def get_prices(self, symbols: list[str]) -> Any:
         return _result(self._request("GET", "/api/v1/prices", params={"symbols": ",".join(symbols)}))
@@ -229,3 +253,13 @@ def _safe_json(response: httpx.Response) -> dict[str, Any]:
 
 def _result(payload: dict[str, Any]) -> Any:
     return payload.get("result", payload)
+
+
+def _retry_delay(response: httpx.Response, policy: RetryPolicy, attempt: int) -> float:
+    retry_after = response.headers.get("Retry-After")
+    if retry_after is not None:
+        try:
+            return max(float(retry_after), 0.0)
+        except ValueError:
+            pass
+    return min(policy.base_delay * (2 ** (attempt - 1)), policy.max_delay)

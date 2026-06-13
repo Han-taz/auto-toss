@@ -2,7 +2,7 @@ import httpx
 import pytest
 import respx
 
-from auto_toss.client import TossClient
+from auto_toss.client import RetryPolicy, TossClient
 from auto_toss.config import Config
 from auto_toss.errors import TossApiError, TossRateLimitError
 
@@ -105,3 +105,87 @@ def test_request_raises_rate_limit_error_with_retry_headers():
 
     assert exc_info.value.retry_after == "2"
     assert exc_info.value.rate_limit == "10"
+
+
+@respx.mock
+def test_retry_policy_retries_429_using_retry_after():
+    mock_token()
+    sleeps = []
+    route = respx.get("https://toss.example.test/api/v1/accounts").mock(
+        side_effect=[
+            httpx.Response(
+                429,
+                headers={"Retry-After": "2"},
+                json={
+                    "error": {
+                        "code": "rate-limit-exceeded",
+                        "message": "too many requests",
+                    }
+                },
+            ),
+            httpx.Response(200, json={"result": [{"accountSeq": 7}]}),
+        ]
+    )
+    client = TossClient(
+        make_config(),
+        retry_policy=RetryPolicy(max_attempts=2, base_delay=1, max_delay=4),
+        sleep=sleeps.append,
+    )
+
+    assert client.get_accounts() == [{"accountSeq": 7}]
+    assert route.call_count == 2
+    assert sleeps == [2.0]
+
+
+@respx.mock
+def test_retry_policy_uses_bounded_backoff_without_retry_after():
+    mock_token()
+    sleeps = []
+    route = respx.get("https://toss.example.test/api/v1/accounts").mock(
+        side_effect=[
+            httpx.Response(
+                429,
+                json={
+                    "error": {
+                        "code": "rate-limit-exceeded",
+                        "message": "too many requests",
+                    }
+                },
+            ),
+            httpx.Response(200, json={"result": [{"accountSeq": 7}]}),
+        ]
+    )
+    client = TossClient(
+        make_config(),
+        retry_policy=RetryPolicy(max_attempts=2, base_delay=1.5, max_delay=4),
+        sleep=sleeps.append,
+    )
+
+    assert client.get_accounts() == [{"accountSeq": 7}]
+    assert route.call_count == 2
+    assert sleeps == [1.5]
+
+
+@respx.mock
+def test_retry_policy_raises_after_attempts_exhausted():
+    mock_token()
+    route = respx.get("https://toss.example.test/api/v1/accounts").mock(
+        return_value=httpx.Response(
+            429,
+            json={
+                "error": {
+                    "code": "rate-limit-exceeded",
+                    "message": "too many requests",
+                }
+            },
+        )
+    )
+    client = TossClient(
+        make_config(),
+        retry_policy=RetryPolicy(max_attempts=2),
+        sleep=lambda _seconds: None,
+    )
+
+    with pytest.raises(TossRateLimitError):
+        client.get_accounts()
+    assert route.call_count == 2
