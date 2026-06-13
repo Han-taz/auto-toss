@@ -14,6 +14,7 @@ from auto_toss.orders import (
     assert_live_order_allowed,
     build_order_payload,
 )
+from auto_toss.paper import PaperBroker, PaperTradingError
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -40,6 +41,41 @@ def build_parser() -> argparse.ArgumentParser:
     holdings.add_argument("--account", required=True)
     holdings.add_argument("--symbol")
 
+    paper_init = subparsers.add_parser(
+        "paper-init",
+        help="Initialize local paper trading state",
+    )
+    _add_paper_db_argument(paper_init)
+    paper_init.add_argument("--reset", action="store_true")
+    paper_init.add_argument("--krw-cash", default="10000000")
+    paper_init.add_argument("--usd-cash", default="10000")
+
+    paper_order = subparsers.add_parser(
+        "paper-order",
+        help="Execute a simulated local paper order",
+    )
+    _add_paper_db_argument(paper_order)
+    paper_order.add_argument("--symbol", required=True)
+    paper_order.add_argument("--side", required=True, choices=["BUY", "SELL"])
+    paper_order.add_argument("--currency", required=True, choices=["KRW", "USD"])
+    paper_order.add_argument("--quantity", required=True)
+    paper_order.add_argument("--fill-price", required=True)
+    paper_order.add_argument("--client-order-id")
+
+    paper_portfolio = subparsers.add_parser(
+        "paper-portfolio",
+        help="Show local paper trading portfolio",
+    )
+    _add_paper_db_argument(paper_portfolio)
+    paper_portfolio.add_argument("--mark-price", action="append", default=[])
+
+    paper_ledger = subparsers.add_parser(
+        "paper-ledger",
+        help="List local paper trading fills",
+    )
+    _add_paper_db_argument(paper_ledger)
+    paper_ledger.add_argument("--limit", type=_positive_int, default=50)
+
     preview_order = subparsers.add_parser(
         "preview-order",
         help="Build an order payload without submitting",
@@ -62,6 +98,7 @@ def main(
     *,
     config_factory: Callable[[], Config] = Config.from_env,
     client_factory: Callable[[Config], TossClient] = TossClient,
+    paper_broker_factory: Callable[[str | None], PaperBroker] | None = None,
     sleep: Callable[[float], None] | None = None,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
@@ -69,12 +106,50 @@ def main(
     stdout = stdout or sys.stdout
     stderr = stderr or sys.stderr
     sleep = sleep or time.sleep
+    paper_broker_factory = paper_broker_factory or _build_paper_broker
     parser = build_parser()
     args = parser.parse_args(argv)
 
     try:
         if args.command == "preview-order":
             _print_json(build_order_payload(_order_request_from_args(args)), stdout)
+            return 0
+
+        if args.command == "paper-init":
+            broker = paper_broker_factory(args.db_path)
+            _print_json(
+                broker.initialize(
+                    reset=args.reset,
+                    krw_cash=args.krw_cash,
+                    usd_cash=args.usd_cash,
+                ),
+                stdout,
+            )
+            return 0
+
+        if args.command == "paper-order":
+            broker = paper_broker_factory(args.db_path)
+            _print_json(
+                broker.execute_order(
+                    symbol=args.symbol,
+                    side=args.side,
+                    currency=args.currency,
+                    quantity=args.quantity,
+                    fill_price=args.fill_price,
+                    client_order_id=args.client_order_id,
+                ),
+                stdout,
+            )
+            return 0
+
+        if args.command == "paper-portfolio":
+            broker = paper_broker_factory(args.db_path)
+            _print_json(broker.portfolio(mark_prices=_parse_mark_prices(args.mark_price)), stdout)
+            return 0
+
+        if args.command == "paper-ledger":
+            broker = paper_broker_factory(args.db_path)
+            _print_json(broker.ledger(limit=args.limit), stdout)
             return 0
 
         config = config_factory()
@@ -111,11 +186,25 @@ def main(
             parser.error(f"unknown command: {args.command}")
     except KeyboardInterrupt:
         return 130
-    except (ConfigError, LiveTradingNotEnabled, OrderValidationError, TossApiError) as exc:
+    except (
+        ConfigError,
+        LiveTradingNotEnabled,
+        OrderValidationError,
+        PaperTradingError,
+        TossApiError,
+    ) as exc:
         print(str(exc), file=stderr)
         return 2
 
     return 0
+
+
+def _add_paper_db_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--db-path", default=None)
+
+
+def _build_paper_broker(db_path: str | None = None) -> PaperBroker:
+    return PaperBroker() if db_path is None else PaperBroker(db_path)
 
 
 def _add_order_arguments(parser: argparse.ArgumentParser) -> None:
@@ -196,3 +285,15 @@ def _positive_int(value: str) -> int:
     if parsed <= 0:
         raise argparse.ArgumentTypeError("--iterations must be positive")
     return parsed
+
+
+def _parse_mark_prices(values: list[str]) -> dict[str, str]:
+    mark_prices = {}
+    for value in values:
+        if "=" not in value:
+            raise PaperTradingError("--mark-price must use SYMBOL=PRICE format.")
+        symbol, price = value.split("=", 1)
+        if not symbol or not price:
+            raise PaperTradingError("--mark-price must use SYMBOL=PRICE format.")
+        mark_prices[symbol] = price
+    return mark_prices

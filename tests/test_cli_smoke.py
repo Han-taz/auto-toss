@@ -11,6 +11,10 @@ def test_parser_has_expected_commands():
         "accounts",
         "holdings",
         "watch-prices",
+        "paper-init",
+        "paper-order",
+        "paper-portfolio",
+        "paper-ledger",
         "preview-order",
         "place-order",
     } <= set(commands)
